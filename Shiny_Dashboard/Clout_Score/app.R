@@ -1,0 +1,532 @@
+# Libraries
+library(DT)
+library(shiny)
+library(tidyr) 
+library(dplyr) 
+library(furrr)
+library(tibble)
+library(waiter)
+library(forcats)
+library(stringi)
+library(stringr) 
+library(syuzhet)
+library(ggplot2)
+library(forcats)
+library(cowplot)
+library(showtext)
+library(gridExtra)
+library(reticulate)
+library(shinydashboard) 
+
+################################################################################
+# Functions
+################################################################################
+
+# Theme
+load_theme <- function(){
+    # Add fonts from Google.
+    font_add_google("Roboto Mono", "Roboto Mono")
+    font_add_google("Open Sans", "Open Sans")
+    font_add_google("Special Elite", "Special Elite")
+    
+    # Set ggplot theme
+    theme_set(theme_minimal(base_family = "Roboto Mono"))
+    theme_update(
+        plot.background = element_rect(fill = "#fafaf5", color = "#fafaf5"),
+        panel.background = element_rect(fill = NA, color = NA),
+        panel.border = element_rect(fill = NA, color = NA),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 10),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 13, margin = margin(r = 10)),
+        legend.title = element_text(size = 9),
+        plot.caption = element_text(
+            family = "Special Elite",
+            size = 10,
+            color = "grey70",
+            face = "bold",
+            hjust = .5,
+            margin = margin(5, 0, 20, 0)
+        ),
+        plot.margin = margin(10, 25, 10, 25)
+    )
+    
+    my_theme <<- theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                                  hjust=1, size = 16, face = "bold"),
+                       axis.title.x  = element_text(size = 14, face = "bold", vjust = 3),
+                       axis.title.y  = element_text(size = 14, face = "bold"),
+                       plot.subtitle = element_text(size = 16),
+                       title = element_text(size = 16),
+                       text  = element_text(size = 16),
+                       legend.title  = element_text(size = 14),
+                       legend.text   = element_text(size = 14), 
+                       plot.caption = element_text(size = 16)) 
+    
+    # Turn on showtext
+    showtext_auto()
+}
+
+
+
+
+
+################################################################################
+# Shiny App
+################################################################################
+
+ui <- dashboardPage(
+    
+
+    
+    # Application title
+    header <- dashboardHeader(title = "Clout Score"), 
+    
+    # Sidebar
+    dashboardSidebar(disable = TRUE),
+    
+    # Text input
+    dashboardBody(
+        box(
+            # Status Bar
+            textOutput("status bar"),
+            verbatimTextOutput("status"),
+            
+            textInput("google_search", "Google Search", "", 
+                      placeholder = "Enter Google Search Here E.g. The Office"),
+            verbatimTextOutput("g_search"),
+            
+            textInput("twitter_hash", "Twitter Hashtag", "", 
+                      placeholder = "Enter Twitter hashtag E.g. TheOffice"),
+            verbatimTextOutput("t_hash"),
+            
+            textInput("reddit_sub", "Reddit Subreddit", "", 
+                      placeholder = "Enter subreddit name E.g. DunderMifflin"),
+            verbatimTextOutput("r_sub"), 
+            
+            # Spinners package
+            waiter::use_waiter(),
+            
+            # Download data button
+            actionButton("input_action", "Download Data"),
+            
+            # Subtopic entry
+            textInput("sub_topic", "Sub Topic", "", 
+                      placeholder = "Enter related subtopic E.g. Pam"),
+            verbatimTextOutput("s_topic"),
+            
+            # Analyse subtopic button     
+            # actionButton("input_action2", "Show Main Trend"),
+            actionButton("input_action3", "Show/Update"),
+            
+        # Text input width
+        width = 2),
+        
+        # Boxplots
+        box(plotOutput("Box"), width = 4),
+        
+        # Bar plot metrics
+        box(plotOutput("Scores"), width = 4),
+        
+        # Data Table
+        box(dataTableOutput("gtrendstable"), width = 2),
+        
+        # Google trends
+        box(plotOutput("Trend1"), width = 5),
+        box(plotOutput("Trend2"), width = 5),
+        
+        # Data Table
+        # box(dataTableOutput("gtrendstable2"), width = 2),
+    )
+)
+
+################################################################################
+
+server <- function(input, output) {
+    # Emoji function
+    emoji_conversion <- function(e){
+        e <- e %>% unlist()
+        len <- length(e)
+        result <- rep("",len)
+        counter <- 1
+        for(i in e){
+            if(i %in% emoji_to_text$emoji){
+                index <- which(emoji_to_text$emoji == i)
+                result[counter] <- emoji_to_text[index, 1]
+            }
+            counter = counter + 1
+        }
+        return(gsub(",","", toString(result)))
+    }
+    
+    # Sentiment Calculation
+    get_sentiment <- function(comment){
+        sent_score <- get_nrc_sentiment(comment)
+        num_score <- (sent_score$positive - sent_score$negative) / 
+            (sent_score$positive + sent_score$negative)
+        if(is.nan(num_score)){
+            return(0)
+        }
+        return(num_score)
+    }
+    
+    output$status <- renderText("Status: Ready")
+    # Python import statements
+    import("praw")
+    import("tweepy")
+    import("pytrends")
+    
+    # API keys
+    py_run_string("import cred_r")
+    py_run_string("import cred_t")
+    
+    # Scraper scripts
+    source_python("../../Scrapers/Reddit_scraper.py")
+    source_python("../../Scrapers/Twitter_scraper.py")
+    source_python("../../Scrapers/Google_scraper.py")
+    
+    # Reactive text entry
+    gs <- reactive(paste0(input$google_search))
+    th <- reactive(paste0("#",input$twitter_hash))
+    rs <- reactive(paste0("r/",input$reddit_sub))
+    st <- reactive(input$sub_topic)
+    
+    # Display text entries
+    output$g_search <- renderText(gs())
+    output$t_hash <- renderText(th())
+    output$r_sub <- renderText(rs())
+    output$s_topic <- renderText(st())
+    
+    # Plot Theme
+    load_theme()
+    
+    # Emoji Data
+    json_data <-
+        rjson::fromJSON(
+            paste0(
+                readLines("data-by-emoji.json", warn=FALSE), collapse = ""))
+    emoji_to_text <- json_data %>% unlist()
+    emoji_to_text <- emoji_to_text %>% as.data.frame()
+    emoji_to_text$emoji <- rownames(emoji_to_text)
+    rownames(emoji_to_text) <- NULL
+    emoji_to_text <- emoji_to_text %>% 
+        mutate(emoji = ifelse(str_detect(emoji, ".name"), emoji, NA),
+               emoji = str_replace(emoji,"\\.name", "")) %>% 
+        drop_na()
+    names(emoji_to_text) <- c("text", "emoji")
+    
+    observeEvent(input$input_action,{
+        output$status <- renderText("Status: Downloading")
+    })
+    
+    
+    # Download Data Action
+    observeEvent(input$input_action,{
+        
+        # Spinner
+        waiter <- waiter::Waiter$new(id = "status", html = spin_chasing_dots())
+        waiter$show()
+        on.exit(waiter$hide())
+        
+        # Reddit
+        message("Downloading Reddit Data…")
+        reddit_csv(input$reddit_sub)
+        message("complete")
+        
+        # Twitter
+        message("Downloading Twitter Data…")
+        twitter_csv(input$twitter_hash)
+        message("complete")
+        
+        # Google
+        message("Downloading Google Data…")
+        google_csv(input$google_search, "main")
+        message("complete")
+        
+        output$status <- renderText("Status: Download Complete")
+    })
+    
+    reddit_fc <- reactive({
+        reddit  <- read.csv("reddit_pull.csv", encoding = "UTF-8")
+        reddit <- 
+            reddit %>% 
+            mutate(comment = gsub("@\\w+ *","", comment),                        # removes @'s
+                   comment = gsub("#\\w+ *","", comment),                        # remove hashtag mentions
+                   comment = gsub(" ?(f|ht)tp(s?)://(.*)[.][a-z]+","", comment), # remove links 1
+                   comment = gsub("/\\w+ *","", comment),                        # remove links 2
+                   emojis = stri_extract_all_charclass(comment, '\\p{EMOJI}'),   # emoji extraction 
+                   emojis = ifelse(lengths(emojis) == 0, NA, emojis),            # NA conversion
+                   emoji_comment = lapply(emojis, emoji_conversion),             # emoji to text conversion
+                   comment = gsub("[^[:alnum:][:space:]']", " ", comment),       # remove special characters
+                   comment = gsub(" at | gt ", " ", comment),                    # cleaning 1
+                   comment = gsub(" amp ", " and ", comment),                    # cleaning 2
+                   comment = gsub("[\r\n]", "", comment),                        # remove \n characters
+                   full_text = paste0(comment, " ", emoji_comment) %>% tolower()) %>%  # concatenate results
+            filter(grepl(tolower(input$sub_topic), full_text))  %>%                 # filter based on subtopic
+            mutate(full_text = full_text %>% tolower()) %>% 
+            mutate(sentiment = future_map(full_text, get_sentiment) %>% unlist)     # get sentiment
+        
+    })
+    
+    twitter_fc <- reactive({
+        twitter <- read.csv("twitter_pull.csv", encoding = "UTF-8")
+        twitter <-
+            twitter %>% 
+            mutate(text = gsub("@\\w+ *","", text),                        # removes @'s
+                   text = gsub("#\\w+ *","", text),                        # remove hashtag mentions
+                   text = gsub(" ?(f|ht)tp(s?)://(.*)[.][a-z]+","", text), # remove links 1
+                   text = gsub("/\\w+ *","", text),                        # remove links 2
+                   emojis = stri_extract_all_charclass(text, '\\p{EMOJI}'),# emoji extraction 
+                   emojis = ifelse(lengths(emojis) == 0, NA, emojis),      # NA conversion
+                   emoji_text = lapply(emojis, emoji_conversion),          # emoji to text conversion
+                   text = gsub("[^[:alnum:][:space:]']", " ", text),       # remove special characters
+                   text = gsub(" at | gt ", " ", text),                    # cleaning 1
+                   text = gsub(" amp ", " and ", text),                    # cleaning 2
+                   text = gsub("[\r\n]", "", text),                        # remove \n characters
+                   full_text = paste0(text, " ", emoji_text) %>% tolower()) %>% # concatenate results
+            filter(grepl(tolower(input$sub_topic), full_text))  %>%             # filter based on subtopic
+            mutate(full_text = full_text %>% tolower()) %>% 
+            mutate(sentiment = future_map(full_text, get_sentiment) %>% unlist)  # get sentiment
+    })
+
+    
+    out_g <- eventReactive(input$input_action3,{
+        # Spinner
+        waiter0 <- waiter::Waiter$new(id = "Trend1", html = spin_gauge())
+        waiter0$show()
+        waiter1 <- waiter::Waiter$new(id = "Trend2", html = spin_pong())
+        waiter1$show()
+        waiter2 <- waiter::Waiter$new(id = "Box", html = spin_3circles())
+        waiter2$show()
+        waiter3 <- waiter::Waiter$new(id = "Scores", html = spin_inner_circles())
+        waiter3$show()
+        waiter4 <- waiter::Waiter$new(id = "gtrendstable", html = spin_wobblebar())
+        waiter4$show()
+        on.exit(waiter0$hide())
+        on.exit(waiter1$hide())
+        on.exit(waiter2$hide())
+        on.exit(waiter3$hide())
+        on.exit(waiter4$hide())
+        
+        google  <- read.csv("google_pull_main.csv", encoding = "UTF-8")
+        google <- google %>% mutate(date = as.Date(date))
+        names(google) <- c("date", "score", "is_partial")
+        google %>% 
+            ggplot(aes(x = date, y = score)) + 
+            geom_line(size = 1.25,  linetype = 1) + 
+            geom_point(size = 2, colour = "red", fill = "black", alpha = 0.9) + 
+            my_theme + 
+            labs(
+                title    = "Main Google Trend Line",
+                x        = "",
+                y        = "Score")
+        
+    })
+    
+    out_g2 <- eventReactive(input$input_action3,{
+        # Spinners
+        
+        google_csv(paste0(input$google_search," ",input$sub_topic), "sub")
+        message("complete")
+        
+        google  <- read.csv("google_pull_sub.csv", encoding = "UTF-8")
+        google <- google %>% mutate(date = as.Date(date))
+        names(google) <- c("date", "score", "is_partial")
+        
+        google %>% 
+            ggplot(aes(x = date, y = score)) + 
+            geom_line(size = 1.25,  linetype = 1) + 
+            geom_point(size = 2, colour = "red", fill = "black", alpha = 0.9) + 
+            my_theme + 
+            labs(
+                title    = paste0(input$sub_topic," ","Trend Line"),
+                x        = "",
+                y        = "Score")
+
+        
+    })
+    
+    out_box <- eventReactive(input$input_action3,{
+        # # Spinner
+        # waiter <- waiter::Waiter$new(id = "Box", html = spin_hexdots())
+        # waiter$show()
+        # on.exit(waiter$hide())
+        
+        reddit <- reddit_fc()
+        twitter <- twitter_fc()
+        
+        # Boxplots
+        t <- twitter %>% 
+            ggplot(aes(y = sentiment)) + 
+            geom_boxplot(fill = "Skyblue3", alpha = 0.6)  + 
+            labs(
+                x        = "Twitter",
+                title = "Sentiment"
+            ) + 
+            my_theme + 
+            theme(axis.text.x = element_blank()) + 
+            ylim(-1,1)
+        
+        
+        r <- reddit %>% 
+            ggplot(aes(y = sentiment)) + 
+            geom_boxplot(fill = "coral2", alpha = 0.6) + 
+            labs(
+                x    = "Reddit",
+                y        = "",
+                title = "Sentiment"
+            ) + 
+            my_theme + 
+            theme(axis.text.x = element_blank()) + 
+            ylim(-1,1)
+        
+        grid.arrange(r,t, ncol = 2)
+    })
+    
+    out_scores <- eventReactive(input$input_action3,{
+        # Spinner
+        # waiter <- waiter::Waiter$new(id = "Scores", html = spin_3circles())
+        # waiter$show()
+        # on.exit(waiter$hide())
+        
+        # Data loading
+        google  <- read.csv("google_pull_sub.csv", encoding = "UTF-8")
+        twitter <- read.csv("twitter_pull.csv", encoding = "UTF-8")
+        reddit  <- read.csv("reddit_pull.csv", encoding = "UTF-8")
+        
+        # Update date
+        google <- google %>% mutate(date = as.Date(date))
+        names(google) <- c("date", "score", "is_partial")
+        
+        # Extract scores as vector
+        google_vals <- google[[2]]
+        
+        # Score metrics
+        google_median_all <- google_vals %>% median()
+        google_mean_all   <- google_vals %>% mean()
+        
+        google_median_last_12 <- google_vals %>% tail(12) %>% median()
+        google_mean_last_12   <- google_vals %>% tail(12) %>% mean()
+        
+        google_scores <- c(google_mean_all, google_mean_last_12,
+                           google_median_all, google_median_last_12) %>% round(2)
+        
+        reddit <- reddit_fc()
+        twitter <- twitter_fc()
+        
+        r_mean <- mean(reddit$sentiment)
+        r_mentions <- length(reddit$sentiment)
+        t_mean <- mean(twitter$sentiment)
+        t_mentions <- length(twitter$sentiment)
+        current_google <- tail(google,1)[[2]]
+        
+        reddit_twitter_total <- (r_mentions * r_mean) + (t_mentions * t_mean)
+        trend_aggregation <- current_google + reddit_twitter_total
+        
+        subtopic_scores <- data.frame(source  = c("Reddit", "Twitter"),
+                                      scores = c((r_mentions * r_mean) / reddit_twitter_total,
+                                                 (t_mentions * t_mean) / reddit_twitter_total))
+        
+        trend_agg_df <- data.frame(scores = trend_aggregation %>% round(1)) 
+        
+        # Subtopic Plots
+        st_1 <- subtopic_scores %>% 
+            ggplot(aes(fill = source, x = 0, y = scores)) + 
+            geom_bar(position="stack", stat="identity", show.legend = TRUE, 
+                     colour = "black") + 
+            # scale_color_manual(labels = c("Reddit", "Twitter"), 
+            #                        values = c("coral2", "Skyblue3")) + 
+            my_theme + 
+            theme(axis.text.x = element_blank(),
+                  legend.position = "bottom",
+                  legend.title = element_blank()) + 
+            ylim(0,1) + 
+            # geom_label(aes(label = source), fill = "white", colour = "Skyblue4",
+            #            vjust = 1.2) +
+            labs(          
+                title    = "Source Ratio",
+                subtitle = "",
+                caption  = "",
+                x        = "",
+                y        = "Scores",
+                col      = ""
+            )
+        
+        st_2 <- trend_agg_df %>% 
+            ggplot(aes(x = 0, y = scores)) + 
+            geom_col(colour= "black", fill = "Aquamarine3",alpha = .9) + 
+            geom_label(aes(label = round(trend_agg_df,5)), 
+                       fill = "white", colour = "Skyblue4",
+                       position = position_dodge(width = 2), vjust = 3) + 
+            my_theme + 
+            theme(axis.text.x = element_blank()) + 
+            ylim(0,(trend_aggregation + 10)) + 
+            labs(
+                title    = "Clout Score",
+                subtitle = "",
+                caption  = "",
+                x        = "",
+                y        = "",
+                col      = ""
+            )
+    
+        grid.arrange(st_1, st_2, ncol = 2)
+    })
+    
+    out_dt <- eventReactive(input$input_action3,{
+        # Spinner
+        # waiter <- waiter::Waiter$new(id = "gtrendstable", html = spin_wobblebar())
+        # waiter$show()
+        # on.exit(waiter$hide())
+        
+        # Data loading
+        google  <- read.csv("google_pull_sub.csv", encoding = "UTF-8")
+        twitter <- read.csv("twitter_pull.csv", encoding = "UTF-8")
+        reddit  <- read.csv("reddit_pull.csv", encoding = "UTF-8")
+        
+        # Update date
+        google <- google %>% mutate(date = as.Date(date))
+        names(google) <- c("date", "score", "is_partial")
+        
+        # Extract scores as vector
+        google_vals <- google[[2]]
+        
+        # Score metrics
+        google_median_all <- google_vals %>% median()
+        google_mean_all   <- google_vals %>% mean()
+        
+        google_median_last_12 <- google_vals %>% tail(12) %>% median()
+        google_mean_last_12   <- google_vals %>% tail(12) %>% mean()
+        
+        google_scores <- c(google_mean_all, google_mean_last_12,
+                           google_median_all, google_median_last_12) %>% round(2)
+        
+        reddit <- reddit_fc()
+        twitter <- twitter_fc()
+        
+        r_mean <- mean(reddit$sentiment)
+        r_mentions <- length(reddit$sentiment)
+        t_mean <- mean(twitter$sentiment)
+        t_mentions <- length(twitter$sentiment)
+        
+        # Data Table
+        table_data <- c(google_scores,  c(r_mentions, r_mean, t_mentions, t_mean)) %>% round(2)
+        gtable <- data.frame("scores" = table_data)
+        rownames(gtable) <- c("Mean Trend All Time", "Mean Trend Last Year",
+                              "Median Trend All Time", "Median Trend Last Year", 
+                              "Reddit Mention Count", "Mean Reddit Sentiment",
+                              "Twitter Mentions Count", "Mean Twitter Sentiment")
+        datatable(gtable, options = list(dom = 't')) 
+    })
+    
+    output$Trend1 <- renderPlot(out_g()) 
+    output$Trend2 <- renderPlot(out_g2()) 
+    output$Box    <- renderPlot(out_box())
+    output$Scores <- renderPlot({out_scores()})
+    output$gtrendstable <- renderDataTable(out_dt())
+
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)

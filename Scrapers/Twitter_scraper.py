@@ -4,10 +4,10 @@ from csv import writer
 
 
 def twitter_csv(hash):
-
+    print("Twitter topic {}".format(hash))
     # Load credentials
-    auth = tweepy.OAuthHandler(cred_t.API_key, cred_t.API_key_secret)
-    auth.set_access_token(cred_t.Access_token, cred_t.Access_token_secret)
+    auth = tweepy.OAuthHandler(cred_t.ct[0], cred_t.ct[1])
+    auth.set_access_token(cred_t.ct[3], cred_t.ct[4])
 
     # API connection
     twitter = tweepy.API(auth)
@@ -65,15 +65,16 @@ def twitter_csv(hash):
                             followers, totaltweets,
                             retweetcount, text, hashtext]
             csv_writer.writerow(ith_tweet)
+    print("Twitter successful")
 
-def main():
-    pass
-    twitter_csv("#theoffice")
-    print("okay")
+# def main():
+#     pass
+#     twitter_csv("#theoffice")
+#     print("okay")
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
 
 
     
