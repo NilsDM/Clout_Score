@@ -248,7 +248,8 @@ server <- function(input, output) {
     })
     
     reddit_fc <- reactive({
-        reddit  <- read.csv("reddit_pull.csv", encoding = "UTF-8")
+        reddit <- read.csv("reddit_pull.csv", encoding = "UTF-8")
+        reddit_master_length <<- (reddit %>% lengths())[[1]]
         reddit <- 
             reddit %>% 
             mutate(comment = gsub("@\\w+ *","", comment),                        # removes @'s
@@ -271,6 +272,7 @@ server <- function(input, output) {
     
     twitter_fc <- reactive({
         twitter <- read.csv("twitter_pull.csv", encoding = "UTF-8")
+        twitter_master_length <<- 500
         twitter <-
             twitter %>% 
             mutate(text = gsub("@\\w+ *","", text),                        # removes @'s
@@ -310,7 +312,7 @@ server <- function(input, output) {
         on.exit(waiter4$hide())
         
         google  <- read.csv("google_pull_main.csv", encoding = "UTF-8")
-        google <- google %>% mutate(date = as.Date(date))
+        google  <- google %>% mutate(date = as.Date(date))
         names(google) <- c("date", "score", "is_partial")
         google %>% 
             ggplot(aes(x = date, y = score)) + 
@@ -421,30 +423,33 @@ server <- function(input, output) {
         t_mentions <- length(twitter$sentiment)
         current_google <- tail(google,1)[[2]]
         
-        reddit_twitter_total <- (r_mentions * r_mean) + (t_mentions * t_mean)
-        trend_aggregation <- current_google + reddit_twitter_total
+        # Internal Metric
+        reddit_twitter_total <- r_mentions + t_mentions
+        clout <- current_google + (r_mentions * r_mean) + (t_mentions * t_mean)
         
         subtopic_scores <- data.frame(source  = c("Reddit", "Twitter"),
                                       scores = c((r_mentions * r_mean) / reddit_twitter_total,
                                                  (t_mentions * t_mean) / reddit_twitter_total))
         
-        trend_agg_df <- data.frame(scores = trend_aggregation %>% round(1)) 
+        ratio_scores <- data.frame(source = c("Reddit", "Twitter"), 
+                                   scores = c(r_mentions / reddit_twitter_total,
+                                              t_mentions / reddit_twitter_total))
+        
+        clout_df <- data.frame(scores = clout) %>% round(1) 
         
         # Subtopic Plots
-        st_1 <- subtopic_scores %>% 
+        st_1 <- ratio_scores %>% 
             ggplot(aes(fill = source, x = 0, y = scores)) + 
             geom_bar(position="stack", stat="identity", show.legend = TRUE, 
                      colour = "black") + 
-            # scale_color_manual(labels = c("Reddit", "Twitter"), 
-            #                        values = c("coral2", "Skyblue3")) + 
             my_theme + 
             theme(axis.text.x = element_blank(),
                   legend.position = "bottom",
                   legend.title = element_blank()) + 
             ylim(0,1) + 
             # geom_label(aes(label = source), fill = "white", colour = "Skyblue4",
-            #            vjust = 1.2) +
-            labs(          
+            #            position = position_dodge(width = 2), vjust = 1.2) +
+            labs(
                 title    = "Source Ratio",
                 subtitle = "",
                 caption  = "",
@@ -453,15 +458,15 @@ server <- function(input, output) {
                 col      = ""
             )
         
-        st_2 <- trend_agg_df %>% 
+        st_2 <- clout_df %>% 
             ggplot(aes(x = 0, y = scores)) + 
             geom_col(colour= "black", fill = "Aquamarine3",alpha = .9) + 
-            geom_label(aes(label = round(trend_agg_df,5)), 
+            geom_label(aes(label = round(clout_df ,5)), 
                        fill = "white", colour = "Skyblue4",
                        position = position_dodge(width = 2), vjust = 3) + 
             my_theme + 
             theme(axis.text.x = element_blank()) + 
-            ylim(0,(trend_aggregation + 10)) + 
+            ylim(0,(clout + 10)) + 
             labs(
                 title    = "Clout Score",
                 subtitle = "",
@@ -470,7 +475,7 @@ server <- function(input, output) {
                 y        = "",
                 col      = ""
             )
-    
+        
         grid.arrange(st_1, st_2, ncol = 2)
     })
     
@@ -509,14 +514,16 @@ server <- function(input, output) {
         r_mentions <- length(reddit$sentiment)
         t_mean <- mean(twitter$sentiment)
         t_mentions <- length(twitter$sentiment)
-        
+
         # Data Table
-        table_data <- c(google_scores,  c(r_mentions, r_mean, t_mentions, t_mean)) %>% round(2)
-        gtable <- data.frame("scores" = table_data)
+        table_data <- c(google_scores,  r_mentions, (r_mentions / reddit_master_length), 
+                        r_mean, t_mentions, (t_mentions / twitter_master_length), t_mean) %>% round(2)
+        gtable <- data.frame("Scores" = table_data)
         rownames(gtable) <- c("Mean Trend All Time", "Mean Trend Last Year",
                               "Median Trend All Time", "Median Trend Last Year", 
-                              "Reddit Mention Count", "Mean Reddit Sentiment",
-                              "Twitter Mentions Count", "Mean Twitter Sentiment")
+                              "Reddit Mention Count", "Reddit Mention Ratio",
+                              "Reddit Mean Sentiment", "Twitter Mentions Count", 
+                              "Twitter Mention Ratio", "Twitter Mean Sentiment")
         datatable(gtable, options = list(dom = 't')) 
     })
     
@@ -527,6 +534,7 @@ server <- function(input, output) {
     output$gtrendstable <- renderDataTable(out_dt())
 
 }
+# pat: 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
 
 # Run the application 
 shinyApp(ui = ui, server = server)

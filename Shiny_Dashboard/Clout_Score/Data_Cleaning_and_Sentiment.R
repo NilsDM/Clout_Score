@@ -12,10 +12,11 @@ library(syuzhet)
 
 
 # Data loading
-google  <- read.csv("google_pull.csv", encoding = "UTF-8")
-twitter <- read.csv("twitter_pull.csv", encoding = "UTF-8")
-reddit  <- read.csv("reddit_pull.csv", encoding = "UTF-8")
-
+google  <- read.csv("../Shiny_Dashboard/Clout_Score/google_pull_sub.csv", encoding = "UTF-8")
+twitter <- read.csv("../Shiny_Dashboard/Clout_Score/twitter_pull.csv", encoding = "UTF-8")
+reddit  <- read.csv("../Shiny_Dashboard/Clout_Score/reddit_pull.csv", encoding = "UTF-8")
+reddit_master_length <- (reddit %>% lengths())[[1]]
+twitter_master_length <- 500
 # Emoji Data
 json_data <-
     rjson::fromJSON(
@@ -87,20 +88,23 @@ google_scores <- c(google_mean_all, google_mean_last_12,
 ################################################################################
 
 # Data Cleaning & Sentiment Scoring
-twitter <- 
-    twitter %>% mutate(text = gsub("@\\w+ *","", text),                        # removes @'s
-                       text = gsub("#\\w+ *","", text),                        # remove hashtag mentions
-                       text = gsub(" ?(f|ht)tp(s?)://(.*)[.][a-z]+","", text), # remove links 1
-                       text = gsub("/\\w+ *","", text),                        # remove links 2
-                       emojis = stri_extract_all_charclass(text, '\\p{EMOJI}'),# emoji extraction 
-                       emojis = ifelse(lengths(emojis) == 0, NA, emojis),      # NA conversion
-                       emoji_text = lapply(emojis, emoji_conversion),          # emoji to text conversion
-                       text = gsub("[^[:alnum:][:space:]']", " ", text),       # remove special characters
-                       text = gsub(" at | gt ", " ", text),                    # cleaning 1
-                       text = gsub(" amp ", " and ", text),                    # cleaning 2
-                       text = gsub("[\r\n]", "", text),                        # remove \n characters
-                       full_text = paste0(text, " ", emoji_text) %>% tolower(),# concatenate results
-                       sentiment = future_map(full_text, get_sentiment) %>% unlist) # get sentiment
+twitter <-
+    twitter %>% 
+    mutate(text = gsub("@\\w+ *","", text),                        # removes @'s
+           text = gsub("#\\w+ *","", text),                        # remove hashtag mentions
+           text = gsub(" ?(f|ht)tp(s?)://(.*)[.][a-z]+","", text), # remove links 1
+           text = gsub("/\\w+ *","", text),                        # remove links 2
+           emojis = stri_extract_all_charclass(text, '\\p{EMOJI}'),# emoji extraction 
+           emojis = ifelse(lengths(emojis) == 0, NA, emojis),      # NA conversion
+           emoji_text = lapply(emojis, emoji_conversion),          # emoji to text conversion
+           text = gsub("[^[:alnum:][:space:]']", " ", text),       # remove special characters
+           text = gsub(" at | gt ", " ", text),                    # cleaning 1
+           text = gsub(" amp ", " and ", text),                    # cleaning 2
+           text = gsub("[\r\n]", "", text),                        # remove \n characters
+           full_text = paste0(text, " ", emoji_text) %>% tolower()) %>% # concatenate results
+    filter(grepl(tolower("Elaine"), full_text))  %>%             # filter based on subtopic
+    mutate(full_text = full_text %>% tolower()) %>% 
+    mutate(sentiment = future_map(full_text, get_sentiment) %>% unlist)
 
 ################################################################################
 # Reddit
@@ -108,22 +112,6 @@ twitter <-
 
 # Data Cleaning & Sentiment Scoring
 reddit <- 
-    reddit %>% 
-        mutate(comment = gsub("@\\w+ *","", comment),                        # removes @'s
-               comment = gsub("#\\w+ *","", comment),                        # remove hashtag mentions
-               comment = gsub(" ?(f|ht)tp(s?)://(.*)[.][a-z]+","", comment), # remove links 1
-               comment = gsub("/\\w+ *","", comment),                        # remove links 2
-               emojis = stri_extract_all_charclass(comment, '\\p{EMOJI}'),   # emoji extraction 
-               emojis = ifelse(lengths(emojis) == 0, NA, emojis),            # NA conversion
-               emoji_comment = lapply(emojis, emoji_conversion),             # emoji to text conversion
-               comment = gsub("[^[:alnum:][:space:]']", " ", comment),       # remove special characters
-               comment = gsub(" at | gt ", " ", comment),                    # cleaning 1
-               comment = gsub(" amp ", " and ", comment),                    # cleaning 2
-               comment = gsub("[\r\n]", "", comment),                        # remove \n characters
-               full_text = paste0(comment, " ", emoji_comment) %>% tolower(),# concatenate results
-               sentiment = future_map(full_text, get_sentiment) %>% unlist)  # get sentiment
-
-# reddit <- 
     reddit %>% 
     mutate(comment = gsub("@\\w+ *","", comment),                        # removes @'s
            comment = gsub("#\\w+ *","", comment),                        # remove hashtag mentions
@@ -137,7 +125,7 @@ reddit <-
            comment = gsub(" amp ", " and ", comment),                    # cleaning 2
            comment = gsub("[\r\n]", "", comment),                        # remove \n characters
            full_text = paste0(comment, " ", emoji_comment) %>% tolower()) %>%  # concatenate results
-    filter(grepl(tolower("pam"), full_text))  %>%                 # filter based on subtopic
+    filter(grepl(tolower("Elaine"), full_text))  %>%                 # filter based on subtopic
     mutate(full_text = full_text %>% tolower()) %>% 
     mutate(sentiment = future_map(full_text, get_sentiment) %>% unlist)     # get sentiment
     

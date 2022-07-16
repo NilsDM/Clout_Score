@@ -1,5 +1,5 @@
 # Load cleaned data sets
-# source("Data_Cleaning_and_Sentiment.R")
+source("Data_Cleaning_and_Sentiment.R")
 
 # Libraries
 library(DT)
@@ -89,33 +89,33 @@ r <- reddit %>%
 
 ### Subtopic
 
-# Reddit
-r_sub_topic <- reddit %>% 
-    filter(grepl("Pam", comment))
-r_mean <- mean(r_sub_topic$sentiment)
-r_mentions <- length(r_sub_topic$sentiment)
 
-# Twitter
-t_sub_topic <- twitter %>% 
-    filter(grepl("Pam", text))
-t_mean <- mean(t_sub_topic$sentiment)
-t_mentions <- length(t_sub_topic$sentiment)
+r_mean <- mean(reddit$sentiment)
+r_mentions <- length(reddit$sentiment)
+
+
+t_mean <- mean(twitter$sentiment)
+t_mentions <- length(twitter$sentiment)
 
 # Google
 current_google <- tail(google,1)[[2]]
 
 # Internal Metric
-reddit_twitter_total <- (r_mentions * r_mean) + (t_mentions * t_mean)
-trend_aggregation <- current_google + reddit_twitter_total
+reddit_twitter_total <- r_mentions + t_mentions
+clout <- current_google + (r_mentions * r_mean) + (t_mentions * t_mean)
 
 subtopic_scores <- data.frame(source  = c("Reddit", "Twitter"),
                               scores = c((r_mentions * r_mean) / reddit_twitter_total,
                                          (t_mentions * t_mean) / reddit_twitter_total))
 
-trend_agg_df <- data.frame(scores = trend_aggregation) 
+ratio_scores <- data.frame(source = c("Reddit", "Twitter"), 
+                           scores = c(r_mentions / reddit_twitter_total,
+                                      t_mentions / reddit_twitter_total))
+
+trend_agg_df <- data.frame(scores = clout) 
 
 # Subtopic Plots
-st_1 <- subtopic_scores %>% 
+st_1 <- ratio_scores %>% 
     ggplot(aes(fill = source, x = 0, y = scores)) + 
     geom_bar(position="stack", stat="identity", show.legend = FALSE, 
              colour = "black") + 
@@ -152,11 +152,14 @@ st_2 <- trend_agg_df %>%
         )
 
 # Data Table
-table_data <- c(google_scores,  c(r_mentions, r_mean, t_mentions, t_mean)) %>% round(2)
+table_data <- c(google_scores,  r_mentions, (r_mentions / reddit_master_length), 
+                r_mean, t_mentions, (t_mentions / twitter_master_length), t_mean) %>% round(2)
 gtable <- data.frame("scores" = table_data)
 rownames(gtable) <- c("Mean Trend All Time", "Mean Trend Last Year",
                       "Median Trend All Time", "Median Trend Last Year", 
-                      "Reddit Mention Count", "Mean Reddit Sentiment",
-                      "Twitter Mentions Count", "Mean Twitter Sentiment")
+                      "Reddit Mention Count", "Reddit Mention Ratio",
+                      "Reddit Mean Sentiment", "Twitter Mentions Count", 
+                      "Twitter Mention Ratio", "Twitter Mean Sentiment")
 dt_gtable <- datatable(gtable) 
-    
+gtable %>% glimpse()
+
