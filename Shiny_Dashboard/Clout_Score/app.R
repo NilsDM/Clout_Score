@@ -534,7 +534,6 @@ server <- function(input, output) {
     output$gtrendstable <- renderDataTable(out_dt())
 
 }
-# pat: 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
 
 # Run the application 
 shinyApp(ui = ui, server = server)
