@@ -16,6 +16,8 @@ data_out %>% view()
 write.csv(data_out, "reddit_sublist_top10k.csv")
 
 data2 = read.csv("reddit_sublist_top10k.csv", encoding = "UTF-8")
+data2[[2]] %>% unlist()
+
 
 data_out2 <- 
     data2 %>% 

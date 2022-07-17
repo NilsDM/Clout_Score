@@ -1,10 +1,12 @@
 # Libraries
 library(DT)
+library(bslib)
 library(shiny)
 library(tidyr) 
 library(dplyr) 
 library(furrr)
-library(tibble)
+library(tibble) 
+library(plotly)
 library(waiter)
 library(forcats)
 library(stringi)
@@ -69,22 +71,18 @@ load_theme <- function(){
 }
 
 
-
-
-
 ################################################################################
 # Shiny App
 ################################################################################
 
 ui <- dashboardPage(
     
-
-    
     # Application title
     header <- dashboardHeader(title = "Clout Score"), 
     
     # Sidebar
     dashboardSidebar(disable = TRUE),
+    
     
     # Text input
     dashboardBody(
@@ -117,11 +115,11 @@ ui <- dashboardPage(
             verbatimTextOutput("s_topic"),
             
             # Analyse subtopic button     
-            # actionButton("input_action2", "Show Main Trend"),
-            actionButton("input_action3", "Show/Update"),
+            actionButton("input_action3", "Show/Update Results"),
             
         # Text input width
         width = 2),
+        
         
         # Boxplots
         box(plotOutput("Box"), width = 4),
@@ -136,8 +134,6 @@ ui <- dashboardPage(
         box(plotOutput("Trend1"), width = 5),
         box(plotOutput("Trend2"), width = 5),
         
-        # Data Table
-        # box(dataTableOutput("gtrendstable2"), width = 2),
     )
 )
 
@@ -250,6 +246,13 @@ server <- function(input, output) {
     reddit_fc <- reactive({
         reddit <- read.csv("reddit_pull.csv", encoding = "UTF-8")
         reddit_master_length <<- (reddit %>% lengths())[[1]]
+        
+        if(is.null(input$sub_topic)){
+            filter_search <- input$google_search.
+        } else {
+            filter_search <- input$sub_topic
+        }
+        
         reddit <- 
             reddit %>% 
             mutate(comment = gsub("@\\w+ *","", comment),                        # removes @'s
@@ -264,7 +267,7 @@ server <- function(input, output) {
                    comment = gsub(" amp ", " and ", comment),                    # cleaning 2
                    comment = gsub("[\r\n]", "", comment),                        # remove \n characters
                    full_text = paste0(comment, " ", emoji_comment) %>% tolower()) %>%  # concatenate results
-            filter(grepl(tolower(input$sub_topic), full_text))  %>%                 # filter based on subtopic
+            filter(grepl(tolower(filter_search), full_text))  %>%                 # filter based on subtopic
             mutate(full_text = full_text %>% tolower()) %>% 
             mutate(sentiment = future_map(full_text, get_sentiment) %>% unlist)     # get sentiment
         
@@ -273,6 +276,13 @@ server <- function(input, output) {
     twitter_fc <- reactive({
         twitter <- read.csv("twitter_pull.csv", encoding = "UTF-8")
         twitter_master_length <<- 500
+        if(is.null(input$sub_topic)){
+            filter_search <- input$google_search.
+        } else {
+            filter_search <- input$sub_topic
+        }
+
+        
         twitter <-
             twitter %>% 
             mutate(text = gsub("@\\w+ *","", text),                        # removes @'s
@@ -287,7 +297,7 @@ server <- function(input, output) {
                    text = gsub(" amp ", " and ", text),                    # cleaning 2
                    text = gsub("[\r\n]", "", text),                        # remove \n characters
                    full_text = paste0(text, " ", emoji_text) %>% tolower()) %>% # concatenate results
-            filter(grepl(tolower(input$sub_topic), full_text))  %>%             # filter based on subtopic
+            filter(grepl(tolower(filter_search), full_text))  %>%             # filter based on subtopic
             mutate(full_text = full_text %>% tolower()) %>% 
             mutate(sentiment = future_map(full_text, get_sentiment) %>% unlist)  # get sentiment
     })
@@ -314,20 +324,20 @@ server <- function(input, output) {
         google  <- read.csv("google_pull_main.csv", encoding = "UTF-8")
         google  <- google %>% mutate(date = as.Date(date))
         names(google) <- c("date", "score", "is_partial")
-        google %>% 
+        g <- google %>% 
             ggplot(aes(x = date, y = score)) + 
             geom_line(size = 1.25,  linetype = 1) + 
             geom_point(size = 2, colour = "red", fill = "black", alpha = 0.9) + 
             my_theme + 
             labs(
-                title    = "Main Google Trend Line",
+                title    = paste0(input$google_search," ","Trend Line"),
                 x        = "",
                 y        = "Score")
+        g
         
     })
     
     out_g2 <- eventReactive(input$input_action3,{
-        # Spinners
         
         google_csv(paste0(input$google_search," ",input$sub_topic), "sub")
         message("complete")
@@ -336,25 +346,23 @@ server <- function(input, output) {
         google <- google %>% mutate(date = as.Date(date))
         names(google) <- c("date", "score", "is_partial")
         
-        google %>% 
+        g <- google %>% 
             ggplot(aes(x = date, y = score)) + 
             geom_line(size = 1.25,  linetype = 1) + 
             geom_point(size = 2, colour = "red", fill = "black", alpha = 0.9) + 
             my_theme + 
             labs(
-                title    = paste0(input$sub_topic," ","Trend Line"),
+                title    = paste0(input$google_search," ",input$sub_topic," ","Trend Line"),
                 x        = "",
                 y        = "Score")
+        g
 
         
     })
     
     out_box <- eventReactive(input$input_action3,{
-        # # Spinner
-        # waiter <- waiter::Waiter$new(id = "Box", html = spin_hexdots())
-        # waiter$show()
-        # on.exit(waiter$hide())
         
+        # Load filtered data
         reddit <- reddit_fc()
         twitter <- twitter_fc()
         
@@ -387,33 +395,40 @@ server <- function(input, output) {
     })
     
     out_scores <- eventReactive(input$input_action3,{
-        # Spinner
-        # waiter <- waiter::Waiter$new(id = "Scores", html = spin_3circles())
-        # waiter$show()
-        # on.exit(waiter$hide())
-        
+
         # Data loading
-        google  <- read.csv("google_pull_sub.csv", encoding = "UTF-8")
+        google1  <- read.csv("google_pull_main.csv", encoding = "UTF-8")
+        
+        if(is.null(input$sub_topic)){
+            google2 <- read.csv("google_pull_main.csv", encoding = "UTF-8")
+        } else {
+            google2  <- read.csv("google_pull_sub.csv", encoding = "UTF-8")
+        }
+        
         twitter <- read.csv("twitter_pull.csv", encoding = "UTF-8")
         reddit  <- read.csv("reddit_pull.csv", encoding = "UTF-8")
         
         # Update date
-        google <- google %>% mutate(date = as.Date(date))
-        names(google) <- c("date", "score", "is_partial")
+        google1 <- google1 %>% mutate(date = as.Date(date))
+        names(google1) <- c("date", "score", "is_partial")
+        google2 <- google2 %>% mutate(date = as.Date(date))
+        names(google2) <- c("date", "score", "is_partial")
         
         # Extract scores as vector
-        google_vals <- google[[2]]
+        google_vals1 <- google1[[2]]
+        google_vals2 <- google2[[2]]
         
         # Score metrics
-        google_median_all <- google_vals %>% median()
-        google_mean_all   <- google_vals %>% mean()
+        google_mean_all1   <- google_vals1 %>% mean()
+        google_mean_all2   <- google_vals2 %>% mean()
         
-        google_median_last_12 <- google_vals %>% tail(12) %>% median()
-        google_mean_last_12   <- google_vals %>% tail(12) %>% mean()
+        google_mean_last_121   <- google_vals1 %>% tail(12) %>% mean()
+        google_mean_last_122   <- google_vals2 %>% tail(12) %>% mean()
         
-        google_scores <- c(google_mean_all, google_mean_last_12,
-                           google_median_all, google_median_last_12) %>% round(2)
+        google_scores <- c(google_mean_all1, google_mean_all2,
+                           google_mean_last_121, google_mean_last_122) %>% round(2)
         
+        # Load filtered data
         reddit <- reddit_fc()
         twitter <- twitter_fc()
         
@@ -421,7 +436,7 @@ server <- function(input, output) {
         r_mentions <- length(reddit$sentiment)
         t_mean <- mean(twitter$sentiment)
         t_mentions <- length(twitter$sentiment)
-        current_google <- tail(google,1)[[2]]
+        current_google <- tail(google2,1)[[2]]
         
         # Internal Metric
         reddit_twitter_total <- r_mentions + t_mentions
@@ -447,8 +462,6 @@ server <- function(input, output) {
                   legend.position = "bottom",
                   legend.title = element_blank()) + 
             ylim(0,1) + 
-            # geom_label(aes(label = source), fill = "white", colour = "Skyblue4",
-            #            position = position_dodge(width = 2), vjust = 1.2) +
             labs(
                 title    = "Source Ratio",
                 subtitle = "",
@@ -461,14 +474,12 @@ server <- function(input, output) {
         st_2 <- clout_df %>% 
             ggplot(aes(x = 0, y = scores)) + 
             geom_col(colour= "black", fill = "Aquamarine3",alpha = .9) + 
-            geom_label(aes(label = round(clout_df ,5)), 
-                       fill = "white", colour = "Skyblue4",
-                       position = position_dodge(width = 2), vjust = 3) + 
+            geom_label(aes(label = round(clout_df, 2)),
+                       fill = "white", colour = "Skyblue4", vjust = 3) +
             my_theme + 
             theme(axis.text.x = element_blank()) + 
-            ylim(0,(clout + 10)) + 
             labs(
-                title    = "Clout Score",
+                title    = paste0("Clout: ", clout %>% round(2)),
                 subtitle = "",
                 caption  = "",
                 x        = "",
@@ -480,32 +491,38 @@ server <- function(input, output) {
     })
     
     out_dt <- eventReactive(input$input_action3,{
-        # Spinner
-        # waiter <- waiter::Waiter$new(id = "gtrendstable", html = spin_wobblebar())
-        # waiter$show()
-        # on.exit(waiter$hide())
         
         # Data loading
-        google  <- read.csv("google_pull_sub.csv", encoding = "UTF-8")
+        google1  <- read.csv("google_pull_main.csv", encoding = "UTF-8")
+        
+        if(is.null(input$sub_topic)){
+            google2 <- read.csv("google_pull_main.csv", encoding = "UTF-8")
+        } else {
+            google2  <- read.csv("google_pull_sub.csv", encoding = "UTF-8")
+        }
+        
         twitter <- read.csv("twitter_pull.csv", encoding = "UTF-8")
         reddit  <- read.csv("reddit_pull.csv", encoding = "UTF-8")
         
         # Update date
-        google <- google %>% mutate(date = as.Date(date))
-        names(google) <- c("date", "score", "is_partial")
+        google1 <- google1 %>% mutate(date = as.Date(date))
+        names(google1) <- c("date", "score", "is_partial")
+        google2 <- google2 %>% mutate(date = as.Date(date))
+        names(google2) <- c("date", "score", "is_partial")
         
         # Extract scores as vector
-        google_vals <- google[[2]]
+        google_vals1 <- google1[[2]]
+        google_vals2 <- google2[[2]]
         
         # Score metrics
-        google_median_all <- google_vals %>% median()
-        google_mean_all   <- google_vals %>% mean()
+        google_mean_all1   <- google_vals1 %>% mean()
+        google_mean_all2   <- google_vals2 %>% mean()
         
-        google_median_last_12 <- google_vals %>% tail(12) %>% median()
-        google_mean_last_12   <- google_vals %>% tail(12) %>% mean()
+        google_mean_last_121   <- google_vals1 %>% tail(12) %>% mean()
+        google_mean_last_122   <- google_vals2 %>% tail(12) %>% mean()
         
-        google_scores <- c(google_mean_all, google_mean_last_12,
-                           google_median_all, google_median_last_12) %>% round(2)
+        google_scores <- c(google_mean_all1, google_mean_all2,
+                           google_mean_last_121, google_mean_last_122) %>% round(2)
         
         reddit <- reddit_fc()
         twitter <- twitter_fc()
@@ -519,8 +536,8 @@ server <- function(input, output) {
         table_data <- c(google_scores,  r_mentions, (r_mentions / reddit_master_length), 
                         r_mean, t_mentions, (t_mentions / twitter_master_length), t_mean) %>% round(2)
         gtable <- data.frame("Scores" = table_data)
-        rownames(gtable) <- c("Mean Trend All Time", "Mean Trend Last Year",
-                              "Median Trend All Time", "Median Trend Last Year", 
+        rownames(gtable) <- c("Main Mean Trend All Time", "Sub Mean Trend All Time",
+                              "Main Mean Trend Last Year", "Sub Mean Trend Last Year", 
                               "Reddit Mention Count", "Reddit Mention Ratio",
                               "Reddit Mean Sentiment", "Twitter Mentions Count", 
                               "Twitter Mention Ratio", "Twitter Mean Sentiment")
@@ -534,7 +551,6 @@ server <- function(input, output) {
     output$gtrendstable <- renderDataTable(out_dt())
 
 }
-# pat: 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
 
 # Run the application 
 shinyApp(ui = ui, server = server)
